@@ -20,7 +20,6 @@ let items = [];
 /* ============================= */
 
 function authMiddleware(req, res, next) {
-
   const header = req.headers.authorization;
 
   if (!header) {
@@ -51,11 +50,15 @@ app.get("/", (req, res) => {
 /* ============================= */
 
 app.post("/auth/google", async (req, res) => {
-
   const { idToken } = req.body;
 
-  try {
+  console.log("📥 BODY:", req.body);
 
+  if (!idToken) {
+    return res.status(400).json({ message: "No idToken provided" });
+  }
+
+  try {
     const googleResponse = await axios.get(
       `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`
     );
@@ -81,13 +84,19 @@ app.post("/auth/google", async (req, res) => {
       { expiresIn: "1d" }
     );
 
-    res.json({
+    console.log("✅ LOGIN OK:", user.name);
+
+    return res.json({
       user,
       token
     });
 
   } catch (error) {
-    res.status(401).json({ message: "Invalid Google token" });
+    console.error("❌ GOOGLE ERROR:", error.response?.data || error.message);
+
+    return res.status(401).json({
+      message: "Invalid Google token"
+    });
   }
 });
 
@@ -96,8 +105,11 @@ app.post("/auth/google", async (req, res) => {
 /* ============================= */
 
 app.post("/items", authMiddleware, (req, res) => {
-
   const { text } = req.body;
+
+  if (!text) {
+    return res.status(400).json({ message: "Text is required" });
+  }
 
   const newItem = {
     id: items.length + 1,
@@ -115,9 +127,7 @@ app.post("/items", authMiddleware, (req, res) => {
 /* ============================= */
 
 app.get("/items", authMiddleware, (req, res) => {
-
   const userItems = items.filter(item => item.userId === req.userId);
-
   res.json(userItems);
 });
 
@@ -127,6 +137,6 @@ app.get("/items", authMiddleware, (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

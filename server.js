@@ -15,9 +15,17 @@ app.use(express.json());
 /* 🍃 MongoDB Connection */
 /* ============================= */
 
-mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("🍃 MongoDB conectado"))
-  .catch(err => console.log("❌ Mongo Error:", err));
+const MONGO_URL = process.env.MONGO_URL;
+
+if (!MONGO_URL) {
+  console.error("❌ MONGO_URL no está definida en las variables de entorno");
+} else {
+  mongoose.connect(MONGO_URL, {
+    serverSelectionTimeoutMS: 5000
+  })
+    .then(() => console.log("🍃 MongoDB conectado"))
+    .catch(err => console.error("❌ Mongo Error:", err.message));
+}
 
 /* ============================= */
 /* 🔐 JWT Secret */
@@ -94,33 +102,42 @@ app.post("/auth/google", async (req, res) => {
 
   const { idToken } = req.body;
 
-  console.log("📥 BODY:", req.body);
-
   if (!idToken) {
     return res.status(400).json({
       message: "No idToken provided"
     });
   }
 
-  try {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      message: "Database not connected"
+    });
+  }
 
+  let googleUser;
+
+  try {
     const googleResponse = await axios.get(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
+    );
+    googleUser = googleResponse.data;
+  } catch (error) {
+    console.error(
+      "❌ GOOGLE ERROR:",
+      error.response?.data || error.message
     );
 
-    const {
-      sub,
-      email,
-      name,
-      picture
-    } = googleResponse.data;
-
-    let user = await User.findOne({
-      googleId: sub
+    return res.status(401).json({
+      message: "Invalid Google token"
     });
+  }
+
+  try {
+    const { sub, email, name, picture } = googleUser;
+
+    let user = await User.findOne({ googleId: sub });
 
     if (!user) {
-
       user = await User.create({
         googleId: sub,
         email,
@@ -132,31 +149,28 @@ app.post("/auth/google", async (req, res) => {
     }
 
     const token = jwt.sign(
-      {
-        userId: user._id
-      },
+      { userId: user._id.toString() },
       SECRET,
-      {
-        expiresIn: "1d"
-      }
+      { expiresIn: "1d" }
     );
 
     console.log("✅ LOGIN OK:", user.name);
 
     return res.json({
-      user,
+      user: {
+        googleId: user.googleId,
+        email: user.email,
+        name: user.name,
+        picture: user.picture
+      },
       token
     });
 
   } catch (error) {
+    console.error("❌ DB ERROR:", error.message);
 
-    console.error(
-      "❌ GOOGLE ERROR:",
-      error.response?.data || error.message
-    );
-
-    return res.status(401).json({
-      message: "Invalid Google token"
+    return res.status(500).json({
+      message: "Database error"
     });
   }
 });
